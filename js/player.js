@@ -158,6 +158,9 @@ class MusicPlayerController {
     this.isSeeking = false;
     this.isShuffle = false;
     this.isRepeatOne = false;
+    this.isInfinityMix = true;
+    this.inMixMode = false;
+    this.mixSourceTrack = null;
     this.isCollapsed = false;
     this.volume = 80;
     this.prevVolume = 80;
@@ -165,8 +168,6 @@ class MusicPlayerController {
     this.isMuted = false;
     this.ytPlayer = null;
     this.isYtReady = false;
-    this.rainPlayer = null;
-    this.isRainReady = false;
     this.isRainActive = false;
     this.pendingPlay = false;
     this.updateTimer = null;
@@ -209,6 +210,7 @@ class MusicPlayerController {
       btnNext: document.getElementById('btn-next'),
       btnShuffle: document.getElementById('btn-shuffle'),
       btnRepeat: document.getElementById('btn-repeat'),
+      btnInfinity: document.getElementById('btn-infinity'),
       btnVolume: document.getElementById('btn-volume'),
       iconVolHigh: document.getElementById('icon-vol-high'),
       iconVolLow: document.getElementById('icon-vol-low'),
@@ -321,6 +323,30 @@ class MusicPlayerController {
       this.playStartTimestamp = Date.now();
       this.setPlayingState(true);
       this.hideNotice();
+
+      // In mix mode or when playing dynamic mix tracks, read video metadata directly from YouTube
+      if (this.ytPlayer && this.ytPlayer.getVideoData) {
+        try {
+          const data = this.ytPlayer.getVideoData();
+          if (data && data.video_id) {
+            const knownIndex = this.tracks.findIndex(t => t.id === data.video_id);
+            if (knownIndex !== -1 && !this.inMixMode) {
+              this.currentIndex = knownIndex;
+              this.updateTrackDisplay();
+            } else {
+              this.inMixMode = true;
+              if (this.dom.trackTitle) this.dom.trackTitle.textContent = data.title || 'Radio Mix Track';
+              if (this.dom.trackArtist) this.dom.trackArtist.textContent = data.author || 'YouTube Mix';
+              if (this.dom.cdThumb) {
+                this.dom.cdThumb.src = `https://i.ytimg.com/vi/${data.video_id}/hqdefault.jpg`;
+                this.dom.cdThumb.alt = (data.title || 'Mix') + ' artwork';
+              }
+              if (this.dom.trackCount) this.dom.trackCount.textContent = '∞ Radio Mix';
+              this.updateActivePlaylistItem();
+            }
+          }
+        } catch (err) {}
+      }
     } else if (e.data === window.YT.PlayerState.PAUSED) {
       this.setPlayingState(false);
     } else if (e.data === window.YT.PlayerState.ENDED) {
@@ -329,7 +355,7 @@ class MusicPlayerController {
         cur = this.ytPlayer.getCurrentTime ? this.ytPlayer.getCurrentTime() : 0;
       } catch (err) {}
 
-      const trackDur = this.tracks[this.currentIndex].durationSec || 10;
+      const trackDur = this.tracks[this.currentIndex] ? (this.tracks[this.currentIndex].durationSec || 10) : 10;
       const playedMs = Date.now() - (this.playStartTimestamp || 0);
 
       // Only advance if track genuinely played
@@ -342,7 +368,7 @@ class MusicPlayerController {
   }
 
   onPlayerError(e) {
-    console.warn('YouTube Player Error code:', e.data, 'on track:', this.tracks[this.currentIndex].title);
+    console.warn('YouTube Player Error code:', e.data, 'on track:', this.tracks[this.currentIndex] ? this.tracks[this.currentIndex].title : 'Mix');
     this.setPlayingState(false);
     this.pendingPlay = false;
 
@@ -379,9 +405,23 @@ class MusicPlayerController {
     if (this.isRepeatOne) {
       this.seekTo(0);
       this.play();
-    } else {
-      this.nextTrack(true);
+      return;
     }
+    if (this.inMixMode) {
+      // In mix mode, let YouTube automatically advance to the next mix song
+      return;
+    }
+    const isLastTrack = this.currentIndex >= this.tracks.length - 1;
+    if (isLastTrack) {
+      if (this.isInfinityMix) {
+        this.startInfinityMix(this.tracks[this.currentIndex]);
+        return;
+      }
+      this.currentIndex = 0;
+      this.loadCurrentTrack(true);
+      return;
+    }
+    this.nextTrack(true);
   }
 
   setPlayingState(playing) {
@@ -430,6 +470,26 @@ class MusicPlayerController {
     if (!this.dom.playlistList) return;
     this.dom.playlistList.innerHTML = '';
 
+    if (this.inMixMode) {
+      const banner = document.createElement('div');
+      banner.className = 'playlist-mix-banner';
+      banner.innerHTML = `
+        <div class="mix-banner-info">
+          <span class="mix-banner-badge">✨ Infinite Radio Mix</span>
+          <span class="mix-banner-seed">Station based on ${escapeHtml(this.mixSourceTrack ? this.mixSourceTrack.title : 'Kaavish')}</span>
+        </div>
+        <button id="btn-return-album" class="mix-return-btn" type="button">← Back to Album</button>
+      `;
+      const retBtn = banner.querySelector('#btn-return-album');
+      if (retBtn) {
+        retBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.returnToAlbum(0);
+        });
+      }
+      this.dom.playlistList.appendChild(banner);
+    }
+
     const query = filter.trim().toLowerCase();
 
     this.tracks.forEach((track, index) => {
@@ -438,7 +498,8 @@ class MusicPlayerController {
       if (query && !matchTitle && !matchArtist) return;
 
       const item = document.createElement('div');
-      item.className = 'playlist-item' + (index === this.currentIndex ? ' active' : '');
+      const isCur = (!this.inMixMode && index === this.currentIndex);
+      item.className = 'playlist-item' + (isCur ? ' active' : '');
       item.dataset.index = index;
       item.innerHTML = `
         <div class="playlist-item-num">${index + 1}</div>
@@ -453,11 +514,21 @@ class MusicPlayerController {
           <div class="playlist-item-artist">${escapeHtml(track.artist)}</div>
         </div>
         <div class="playlist-item-dur">${track.duration}</div>
+        <button class="item-mix-btn" type="button" title="Start Infinite Radio from this song">✦ Mix</button>
       `;
 
-      item.addEventListener('click', () => {
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('item-mix-btn')) return;
         this.selectTrack(index, true);
       });
+
+      const mixBtn = item.querySelector('.item-mix-btn');
+      if (mixBtn) {
+        mixBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.startInfinityMix(track);
+        });
+      }
 
       this.dom.playlistList.appendChild(item);
     });
@@ -468,7 +539,7 @@ class MusicPlayerController {
     const items = this.dom.playlistList.querySelectorAll('.playlist-item');
     items.forEach(item => {
       const idx = parseInt(item.dataset.index, 10);
-      if (idx === this.currentIndex) {
+      if (idx === this.currentIndex && !this.inMixMode) {
         item.classList.add('active');
         if (this.isPlaying) {
           item.classList.add('playing');
@@ -484,6 +555,12 @@ class MusicPlayerController {
   selectTrack(index, autoPlay = true) {
     if (index < 0 || index >= this.tracks.length) return;
     if (this.skipDebounceTimer) clearTimeout(this.skipDebounceTimer);
+
+    if (this.inMixMode) {
+      this.inMixMode = false;
+      this.mixSourceTrack = null;
+      this.renderPlaylistDrawer();
+    }
 
     this.currentIndex = index;
     const track = this.tracks[this.currentIndex];
@@ -547,11 +624,33 @@ class MusicPlayerController {
   }
 
   nextTrack(autoPlay = true) {
+    if (this.inMixMode) {
+      if (this.isYtReady && this.ytPlayer && this.ytPlayer.nextVideo) {
+        try {
+          this.ytPlayer.nextVideo();
+          return;
+        } catch (err) {}
+      }
+    }
+    if (this.isRepeatOne) {
+      this.seekTo(0);
+      if (autoPlay) this.play();
+      return;
+    }
     if (this.isShuffle) {
       this.nextShuffleTrack(autoPlay);
       return;
     }
-    const nextIdx = (this.currentIndex + 1) % this.tracks.length;
+    const isLastTrack = this.currentIndex >= this.tracks.length - 1;
+    if (isLastTrack) {
+      if (this.isInfinityMix) {
+        this.startInfinityMix(this.tracks[this.currentIndex]);
+        return;
+      }
+      this.selectTrack(0, autoPlay);
+      return;
+    }
+    const nextIdx = this.currentIndex + 1;
     this.selectTrack(nextIdx, autoPlay);
   }
 
@@ -565,12 +664,73 @@ class MusicPlayerController {
         }
       } catch (err) {}
     }
+    if (this.inMixMode) {
+      if (this.isYtReady && this.ytPlayer && this.ytPlayer.previousVideo) {
+        try {
+          this.ytPlayer.previousVideo();
+          return;
+        } catch (err) {}
+      }
+    }
     if (this.isShuffle) {
       this.prevShuffleTrack(autoPlay);
       return;
     }
     const prevIdx = (this.currentIndex - 1 + this.tracks.length) % this.tracks.length;
     this.selectTrack(prevIdx, autoPlay);
+  }
+
+  toggleInfinityMix(forced) {
+    this.isInfinityMix = typeof forced === 'boolean' ? forced : !this.isInfinityMix;
+    if (this.dom.btnInfinity) {
+      this.dom.btnInfinity.classList.toggle('active', this.isInfinityMix);
+      this.dom.btnInfinity.setAttribute('aria-pressed', String(this.isInfinityMix));
+      this.dom.btnInfinity.title = this.isInfinityMix
+        ? 'Infinity Mix: Auto-play endless radio when album ends (Active)'
+        : 'Infinity Mix: Disabled';
+    }
+    this.showNotice(
+      this.isInfinityMix
+        ? '✨ <strong>Infinity Mix Active:</strong> Endless radio will play automatically when the album ends.'
+        : 'Infinity Mix Disabled',
+      2500
+    );
+  }
+
+  startInfinityMix(sourceTrack) {
+    this.inMixMode = true;
+    this.mixSourceTrack = sourceTrack || this.tracks[this.currentIndex];
+    const targetId = this.mixSourceTrack ? this.mixSourceTrack.id : this.tracks[0].id;
+
+    this.showNotice(
+      `✨ <strong>Starting Infinite Radio:</strong> Branching into endless mix based on <em>${escapeHtml(this.mixSourceTrack ? this.mixSourceTrack.title : 'Kaavish')}</em>...`,
+      3500
+    );
+
+    if (this.isYtReady && this.ytPlayer && this.ytPlayer.loadPlaylist) {
+      try {
+        this.ytPlayer.loadPlaylist({
+          list: 'RD' + targetId,
+          listType: 'playlist',
+          index: 0
+        });
+        this.setPlayingState(true);
+      } catch (err) {
+        console.warn('Load RD playlist error:', err);
+      }
+    }
+
+    if (this.dom.trackCount) {
+      this.dom.trackCount.textContent = '∞ Radio Mix';
+    }
+    this.renderPlaylistDrawer();
+  }
+
+  returnToAlbum(trackIndex = 0) {
+    this.inMixMode = false;
+    this.mixSourceTrack = null;
+    this.selectTrack(trackIndex, true);
+    this.showNotice('🎵 Returned to Kaavish Collection', 2500);
   }
 
   generateShuffleOrder() {
@@ -731,12 +891,15 @@ class MusicPlayerController {
       this.dom.btnNext.addEventListener('click', () => this.nextTrack(true));
     }
 
-    // Shuffle / Repeat
+    // Shuffle / Repeat / Infinity Mix
     if (this.dom.btnShuffle) {
       this.dom.btnShuffle.addEventListener('click', () => this.toggleShuffle());
     }
     if (this.dom.btnRepeat) {
       this.dom.btnRepeat.addEventListener('click', () => this.toggleRepeat());
+    }
+    if (this.dom.btnInfinity) {
+      this.dom.btnInfinity.addEventListener('click', () => this.toggleInfinityMix());
     }
 
     // Seek bar interaction

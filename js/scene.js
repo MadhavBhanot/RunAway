@@ -151,8 +151,61 @@ function buildScene(R, W, H, seed, mode) {
     pal: pick(R, SKY_PALETTES),
     species: shuffle(R, SPECIES.slice()),
     rainStreaks,
-    rainActive: false
+    rainActive: false,
+    shadowFloraStamp: null,
+    shadowGrassStamp: null,
+    shadowRainFloraStamp: null,
+    shadowRainGrassStamp: null
   };
+
+  // Pre-baked reusable soft blurred watercolor shadow stamps (Zero GC allocations per frame!)
+  push(() => {
+    const stampBox = 64;
+    S.shadowFloraStamp = sprite(stampBox, stampBox, (g) => {
+      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 1, stampBox / 2, stampBox / 2, stampBox / 2);
+      rad.addColorStop(0, 'rgba(40, 30, 52, 0.42)');
+      rad.addColorStop(0.45, 'rgba(40, 30, 52, 0.20)');
+      rad.addColorStop(0.85, 'rgba(40, 30, 52, 0.05)');
+      rad.addColorStop(1, 'rgba(40, 30, 52, 0)');
+      g.fillStyle = rad;
+      g.beginPath();
+      g.arc(stampBox / 2, stampBox / 2, stampBox / 2, 0, Math.PI * 2);
+      g.fill();
+    });
+
+    S.shadowGrassStamp = sprite(stampBox, stampBox, (g) => {
+      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 1, stampBox / 2, stampBox / 2, stampBox / 2);
+      rad.addColorStop(0, 'rgba(40, 30, 52, 0.28)');
+      rad.addColorStop(0.5, 'rgba(40, 30, 52, 0.12)');
+      rad.addColorStop(1, 'rgba(40, 30, 52, 0)');
+      g.fillStyle = rad;
+      g.beginPath();
+      g.arc(stampBox / 2, stampBox / 2, stampBox / 2, 0, Math.PI * 2);
+      g.fill();
+    });
+
+    S.shadowRainFloraStamp = sprite(stampBox, stampBox, (g) => {
+      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 1, stampBox / 2, stampBox / 2, stampBox / 2);
+      rad.addColorStop(0, 'rgba(16, 24, 32, 0.50)');
+      rad.addColorStop(0.45, 'rgba(16, 24, 32, 0.24)');
+      rad.addColorStop(1, 'rgba(16, 24, 32, 0)');
+      g.fillStyle = rad;
+      g.beginPath();
+      g.arc(stampBox / 2, stampBox / 2, stampBox / 2, 0, Math.PI * 2);
+      g.fill();
+    });
+
+    S.shadowRainGrassStamp = sprite(stampBox, stampBox, (g) => {
+      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 1, stampBox / 2, stampBox / 2, stampBox / 2);
+      rad.addColorStop(0, 'rgba(16, 24, 32, 0.32)');
+      rad.addColorStop(0.5, 'rgba(16, 24, 32, 0.14)');
+      rad.addColorStop(1, 'rgba(16, 24, 32, 0)');
+      g.fillStyle = rad;
+      g.beginPath();
+      g.arc(stampBox / 2, stampBox / 2, stampBox / 2, 0, Math.PI * 2);
+      g.fill();
+    });
+  });
 
   // ---- dreamy aesthetic cinematic sky: 4-tier sunset atmospheric gradient + sun radiance ----
   push(() => {
@@ -471,7 +524,7 @@ function buildScene(R, W, H, seed, mode) {
   // One scale and one origin for the WHOLE cycle, measured once. Re-fitting
   // each drawing to the same box would iron out the bob and glue his feet to a
   // line — the two things that make a run look like a run.
-  const bw = figH * 1.5, bh = figH * 1.5;
+  const bw = figH * 2.2, bh = figH * 1.8;
   const ref = buildRig(FULL_CYCLE[0]);
   let lo = Infinity, hi = -Infinity;
   for (const k in ref) {
@@ -481,8 +534,8 @@ function buildScene(R, W, H, seed, mode) {
   }
   const scale = figH / Math.max(1e-3, hi - lo);
   const g0 = project([0, 0, 0], cam);
-  const ox = bw / 2 - g0.x * scale;
-  const oy = bh * 0.9 - g0.y * scale;
+  const ox = bw * 0.52 - g0.x * scale;
+  const oy = bh * 0.82 - g0.y * scale;
 
   for (let i = 0; i < FRAMES; i++) {
     push(() => {
@@ -493,9 +546,76 @@ function buildScene(R, W, H, seed, mode) {
       // a stumble is off balance, which a run and a walk are not
       if (gait.leanNoise) pose.lean += rr(FR, -gait.leanNoise, gait.leanNoise);
       const J = buildRig(pose, { jit: () => rr(FR, -gait.jit, gait.jit) });
-      const cv = sprite(bw, bh, () => {
-        const P = projectRig(J, cam, ox, oy, scale);
+      const P = projectRig(J, cam, ox, oy, scale);
+      const cv = sprite(bw, bh, (g) => {
         const prev = getPen();
+        const canFilter = (g && typeof g.filter === 'string');
+
+        // 0. Articulated 3D Ground Cast Shadow (Slender, translucent, realistic grass-draped shadow)
+        const S_pts = {};
+        const sunDirX = -0.42;
+        const sunDirZ = -0.85;
+        for (const k in J) {
+          if (k === 'headR') continue;
+          const pt = J[k];
+          const gPt = [pt[0] + sunDirX * pt[1], 0, pt[2] + sunDirZ * pt[1]];
+          const proj = project(gPt, cam);
+          S_pts[k] = [ox + proj.x * scale, oy + proj.y * scale];
+        }
+
+        // Subtle grass ripple: gently wiggles shadow lines over uneven turf
+        const warp = (pts, amp = 1.6, freq = 0.18) => {
+          const res = [];
+          for (let idx = 0; idx < pts.length; idx++) {
+            const p = pts[idx];
+            if (idx < pts.length - 1) {
+              const q = pts[idx + 1];
+              res.push([
+                p[0] + Math.sin(p[0] * freq + p[1] * 0.1) * amp,
+                p[1] + Math.cos(p[0] * (freq * 0.7)) * (amp * 0.25)
+              ]);
+              const mid = [(p[0] + q[0]) * 0.5, (p[1] + q[1]) * 0.5];
+              res.push([
+                mid[0] + Math.sin(mid[0] * freq * 1.4) * amp,
+                mid[1] + Math.cos(mid[0] * freq) * (amp * 0.3)
+              ]);
+            } else {
+              res.push([
+                p[0] + Math.sin(p[0] * freq) * amp,
+                p[1] + Math.cos(p[0] * (freq * 0.7)) * (amp * 0.25)
+              ]);
+            }
+          }
+          return res;
+        };
+
+        // Slender, tangible, watercolor cast shadow (soft optical blur)
+        if (canFilter) g.filter = 'blur(2.6px)';
+        setPen([44, 34, 52]);
+
+        // Translucent torso & spine shadow
+        const spineWarped = warp([S_pts.pelvis, S_pts.chest, S_pts.neck, S_pts.head], 2.2);
+        ink(FR, spineWarped, 4.4, { alpha: 0.36, amp: 0.9, skip: 0.2, nib: false, minPress: 0.35 });
+
+        // Translucent arms shadow
+        for (const s of ['L', 'R']) {
+          const armWarped = warp([S_pts['shoulder' + s], S_pts['elbow' + s], S_pts['wrist' + s]], 1.8);
+          ink(FR, armWarped, 3.2, { alpha: 0.28, amp: 0.7, skip: 0.2, nib: false, minPress: 0.3 });
+        }
+
+        // Open, delicate head ring shadow
+        inkLoop(FR, ring(FR, S_pts.head[0], S_pts.head[1], P.headR * 0.95, P.headR * 0.75, 9, 0, 0.1),
+          2.6, { alpha: 0.30, redraw: 0.15, segs: 2 });
+
+        // Slender legs shadow
+        if (canFilter) g.filter = 'blur(1.6px)';
+        for (const s of ['L', 'R']) {
+          const legWarped = warp([S_pts['hip' + s], S_pts['knee' + s], S_pts['ankle' + s], S_pts['toe' + s]], 2.0);
+          ink(FR, legWarped, 3.8, { alpha: 0.38, amp: 0.8, skip: 0.2, nib: false, minPress: 0.4 });
+        }
+
+        // Reset filter for crisp pencil stickman & rim light
+        if (canFilter) g.filter = 'none';
 
         // 1. Cinematic Golden Sunset Rim Light (Sunlight catching shoulders, spine & limbs)
         const rimCol = S.pal.cloudOrange || [255, 148, 52];
@@ -525,7 +645,9 @@ function buildScene(R, W, H, seed, mode) {
         drawStickman(FR, P, { w: 3.4, alpha: 1, ghost: 0.24, action: false });
         setPen(prev);
       });
-      S.frames.push({ cv, w: bw, h: bh });
+      const footL = P.toeL ? [P.toeL[0] - bw * 0.52, P.toeL[1] - bh * 0.82] : [0, 0];
+      const footR = P.toeR ? [P.toeR[0] - bw * 0.52, P.toeR[1] - bh * 0.82] : [0, 0];
+      S.frames.push({ cv, w: bw, h: bh, footL, footR, bob: pose.bob || 0 });
     });
   }
 
@@ -636,7 +758,28 @@ function renderScene(g, S) {
     drawn = true;
     const rx = W / 2, ry = runnerY;
 
-    // 1. Cinematic Sunset Backlight Bloom around character
+    // --- 1. Realistic Subtle Foot Ground Contact (Zero Big Blobs) ---
+    const feet = [fr.footL, fr.footR];
+    for (let f = 0; f < feet.length; f++) {
+      const foot = feet[f];
+      if (!foot) continue;
+      const fx = rx + foot[0];
+      const heightAboveGround = Math.max(0, -foot[1]);
+      const proximity = Math.max(0, 1 - heightAboveGround / 12);
+
+      if (proximity > 0.1) {
+        g.save();
+        g.globalCompositeOperation = 'multiply';
+        const shadowBase = S.rainActive ? '18, 24, 32' : '36, 26, 44';
+        g.fillStyle = `rgba(${shadowBase}, ${(0.20 * proximity).toFixed(3)})`;
+        g.beginPath();
+        g.ellipse(fx, ry + 0.5, 4.0, 1.1, 0, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      }
+    }
+
+    // 2. Cinematic Sunset Backlight Bloom around character
     g.save();
     const bloomGrad = g.createRadialGradient(rx, ry - fr.h * 0.45, fr.w * 0.08, rx, ry - fr.h * 0.45, fr.w * 0.75);
     bloomGrad.addColorStop(0, 'rgba(255, 224, 110, 0.20)');
@@ -648,8 +791,8 @@ function renderScene(g, S) {
     g.fill();
     g.restore();
 
-    // 2. Runner Drawing
-    g.drawImage(fr.cv, rx - fr.w / 2, ry - fr.h * 0.9, fr.w, fr.h);
+    // 3. Runner Drawing (with synchronized 3D ground cast shadow)
+    g.drawImage(fr.cv, rx - fr.w * 0.52, ry - fr.h * 0.82, fr.w, fr.h);
   };
 
   // Wind, not a metronome: two slow sines that drift in and out of phase make
@@ -691,6 +834,23 @@ function renderScene(g, S) {
     const isFlora = it.kind === 'flora';
     const rainPop = (S.rainActive && isFlora);
 
+    // 0. Super-fast hardware accelerated pre-baked Ground Cast Shadow
+    if (it.kind !== 'bird' && h > 5) {
+      g.save();
+      g.globalCompositeOperation = 'multiply';
+      g.globalAlpha = (isFlora ? 0.72 : 0.42) * it.alpha * (rainPop ? 1.2 : 1);
+      const shLen = h * (isFlora ? 0.42 : 0.26);
+      const shW = Math.max(4, w * (isFlora ? 0.60 : 0.40));
+
+      g.translate(sx, sy);
+      g.rotate(-0.35 + (bend * 0.35));
+      const stamp = S.rainActive
+        ? (isFlora ? S.shadowRainFloraStamp : S.shadowRainGrassStamp)
+        : (isFlora ? S.shadowFloraStamp : S.shadowGrassStamp);
+      if (stamp) g.drawImage(stamp, -shLen * 0.8, -shW * 0.3, shLen * 0.8, shW * 0.6);
+      g.restore();
+    }
+
     g.globalAlpha = it.alpha * (rainPop ? 1 : clamp((S.far - it.z) / (S.far * 0.3), 0, 1));
     g.save();
     g.translate(sx, sy);
@@ -717,30 +877,32 @@ function renderScene(g, S) {
   g.fillStyle = vig;
   g.fillRect(0, 0, W, H);
 
-  // 6. Rain: Pencil-Style Strands of Falling Rain & Splashes
+  // 6. Batched Rain: 1-Pass Strands of Falling Rain & Splashes (Blazing 60/120 FPS performance)
   if (S.rainActive && S.rainStreaks) {
     g.save();
     g.lineCap = 'round';
+    g.strokeStyle = 'rgba(50, 58, 70, 0.38)';
+    g.lineWidth = 0.8;
+    g.beginPath();
     const slant = -0.15;
-    for (const st of S.rainStreaks) {
-      const ex = st.x + slant * st.len;
-      const ey = st.y + st.len;
-      g.strokeStyle = `rgba(50, 58, 70, ${st.alpha})`;
-      g.lineWidth = st.w;
-      g.beginPath();
+    for (let si = 0; si < S.rainStreaks.length; si++) {
+      const st = S.rainStreaks[si];
       g.moveTo(st.x, st.y);
-      g.lineTo(ex, ey);
-      g.stroke();
+      g.lineTo(st.x + slant * st.len, st.y + st.len);
+    }
+    g.stroke();
 
-      // Micro graphite splash ring on ground
+    // Batched micro graphite splashes
+    g.strokeStyle = 'rgba(60, 72, 88, 0.22)';
+    g.lineWidth = 0.6;
+    g.beginPath();
+    for (let si = 0; si < S.rainStreaks.length; si++) {
+      const st = S.rainStreaks[si];
       if (st.splash && st.y > S.horizonY + 20 && st.y < H - 10) {
-        g.strokeStyle = `rgba(60, 72, 88, ${st.alpha * 0.45})`;
-        g.lineWidth = 0.6;
-        g.beginPath();
         g.ellipse(st.x, st.y, st.splashR, st.splashR * 0.32, 0, 0, Math.PI * 2);
-        g.stroke();
       }
     }
+    g.stroke();
     g.restore();
   }
 }
