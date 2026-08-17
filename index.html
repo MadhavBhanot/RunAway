@@ -14,8 +14,14 @@
   window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
   window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
 </script>
-<script defer src="/_vercel/insights/script.js"></script>
-<script defer src="/_vercel/speed-insights/script.js"></script>
+<script type="module">
+  import { inject } from 'https://cdn.jsdelivr.net/npm/@vercel/analytics@latest/+esm';
+  import { injectSpeedInsights } from 'https://cdn.jsdelivr.net/npm/@vercel/speed-insights@latest/+esm';
+  try { inject({ mode: 'auto' }); } catch (e) {}
+  try { injectSpeedInsights(); } catch (e) {}
+</script>
+<script defer src="https://va.vercel-scripts.com/v1/script.js"></script>
+<script defer src="https://va.vercel-scripts.com/v1/speed-insights/script.js"></script>
 </head>
 <body>
 <canvas id="c" aria-label="A hand-drawn animation, seen from behind a stick figure running through Australian grassland"></canvas>
