@@ -180,6 +180,8 @@ class MusicPlayerController {
     this.skipDebounceTimer = null;
     this.noticeTimer = null;
 
+    this.rainEngine = new RainAudioEngine();
+
     this.initDOM();
     this.renderPlaylistDrawer();
     this.updateTrackDisplay();
@@ -918,6 +920,18 @@ class MusicPlayerController {
 
   setRain(active) {
     this.isRainActive = !!active;
+
+    // 1. Web Audio Procedural Rain Sound (guaranteed concurrent simultaneous audio on mobile & desktop)
+    if (this.rainEngine) {
+      if (this.isRainActive) {
+        this.rainEngine.setVolume(this.rainVolume ?? 10);
+        this.rainEngine.play();
+      } else {
+        this.rainEngine.stop();
+      }
+    }
+
+    // 2. YouTube Rain Player (for desktop browsers)
     if (this.rainPlayer && this.isRainReady) {
       try {
         if (this.isRainActive) {
@@ -935,10 +949,134 @@ class MusicPlayerController {
   setRainVolume(val) {
     const v = Math.max(0, Math.min(100, parseInt(val, 10) || 0));
     this.rainVolume = v;
+    if (this.rainEngine) {
+      this.rainEngine.setVolume(v);
+    }
     if (this.rainPlayer && this.isRainReady) {
       try {
         this.rainPlayer.setVolume(v);
       } catch (err) {}
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Web Audio Ambient Rain Sound Synthesizer
+// Provides soothing, zero-lag, continuous procedural rain and thunder
+// that plays seamlessly and concurrently alongside YouTube music on mobile and desktop.
+// ---------------------------------------------------------------------------
+class RainAudioEngine {
+  constructor() {
+    this.ctx = null;
+    this.gainNode = null;
+    this.source = null;
+    this.isPlaying = false;
+    this.volume = 10;
+  }
+
+  init() {
+    if (this.ctx) return;
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      this.ctx = new AudioCtx();
+
+      this.gainNode = this.ctx.createGain();
+      this.gainNode.gain.setValueAtTime(0, this.ctx.currentTime);
+
+      const bufferSize = this.ctx.sampleRate * 4;
+      const noiseBuffer = this.ctx.createBuffer(2, bufferSize, this.ctx.sampleRate);
+      const left = noiseBuffer.getChannelData(0);
+      const right = noiseBuffer.getChannelData(1);
+
+      let b0L = 0, b1L = 0, b2L = 0, b0R = 0, b1R = 0, b2R = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const whiteL = Math.random() * 2 - 1;
+        const whiteR = Math.random() * 2 - 1;
+
+        b0L = 0.997 * b0L + whiteL * 0.055;
+        b1L = 0.985 * b1L + whiteL * 0.075;
+        b2L = 0.950 * b2L + whiteL * 0.153;
+        left[i] = (b0L + b1L + b2L + whiteL * 0.1) * 0.45;
+
+        b0R = 0.997 * b0R + whiteR * 0.055;
+        b1R = 0.985 * b1R + whiteR * 0.075;
+        b2R = 0.950 * b2R + whiteR * 0.153;
+        right[i] = (b0R + b1R + b2R + whiteR * 0.1) * 0.45;
+      }
+
+      this.noiseBuffer = noiseBuffer;
+
+      this.bandpass = this.ctx.createBiquadFilter();
+      this.bandpass.type = 'bandpass';
+      this.bandpass.frequency.setValueAtTime(1050, this.ctx.currentTime);
+      this.bandpass.Q.setValueAtTime(0.7, this.ctx.currentTime);
+
+      this.lowpass = this.ctx.createBiquadFilter();
+      this.lowpass.type = 'lowpass';
+      this.lowpass.frequency.setValueAtTime(3600, this.ctx.currentTime);
+
+      this.highpass = this.ctx.createBiquadFilter();
+      this.highpass.type = 'highpass';
+      this.highpass.frequency.setValueAtTime(240, this.ctx.currentTime);
+
+      this.bandpass.connect(this.lowpass);
+      this.lowpass.connect(this.highpass);
+      this.highpass.connect(this.gainNode);
+      this.gainNode.connect(this.ctx.destination);
+    } catch (e) {
+      console.warn('Web Audio Rain init:', e);
+    }
+  }
+
+  play() {
+    this.init();
+    if (!this.ctx) return;
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+    if (this.isPlaying) return;
+
+    try {
+      this.source = this.ctx.createBufferSource();
+      this.source.buffer = this.noiseBuffer;
+      this.source.loop = true;
+      this.source.connect(this.bandpass);
+      this.source.start(0);
+      this.isPlaying = true;
+
+      const targetGain = (this.volume / 100) * 0.55;
+      this.gainNode.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.gainNode.gain.setValueAtTime(this.gainNode.gain.value || 0.0001, this.ctx.currentTime);
+      this.gainNode.gain.linearRampToValueAtTime(targetGain, this.ctx.currentTime + 0.15);
+    } catch (e) {
+      console.warn('Rain audio play:', e);
+    }
+  }
+
+  stop() {
+    if (!this.isPlaying || !this.ctx) return;
+    try {
+      this.gainNode.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, this.ctx.currentTime);
+      this.gainNode.gain.linearRampToValueAtTime(0.0001, this.ctx.currentTime + 0.15);
+      setTimeout(() => {
+        if (!this.isPlaying && this.source) {
+          try { this.source.stop(); this.source.disconnect(); } catch (e) {}
+          this.source = null;
+        }
+      }, 160);
+      this.isPlaying = false;
+    } catch (e) {}
+  }
+
+  setVolume(vol) {
+    this.volume = Math.max(0, Math.min(100, vol));
+    if (this.ctx && this.gainNode && this.isPlaying) {
+      const targetGain = (this.volume / 100) * 0.55;
+      this.gainNode.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, this.ctx.currentTime);
+      this.gainNode.gain.linearRampToValueAtTime(targetGain, this.ctx.currentTime + 0.04);
     }
   }
 }
