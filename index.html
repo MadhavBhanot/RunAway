@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Field Book</title>
+<meta name="description" content="A seeded sketchbook page: a stick man running through Australian grassland, in graphite and watercolour.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+
+<!-- Vercel Web Analytics & Speed Insights -->
+<script>
+  window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+  window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
+</script>
+<script defer src="/_vercel/insights/script.js"></script>
+<script defer src="/_vercel/speed-insights/script.js"></script>
+</head>
+<body>
+<canvas id="c" aria-label="A hand-drawn animation, seen from behind a stick figure running through Australian grassland"></canvas>
+
+<nav id="ui" aria-label="Controls">
+  <div class="ui-top-row">
+    <div id="modes" role="group" aria-label="Gait">
+      <button type="button" data-mode="walk" aria-pressed="false">Walk</button>
+      <button type="button" data-mode="stumble" aria-pressed="false">Stumble</button>
+      <button type="button" data-mode="run" aria-pressed="true">Run</button>
+    </div>
+
+    <!-- Small Circle Actions Button that grows into a big menu -->
+    <div id="ui-actions-group" class="ui-actions-group">
+      <button id="bActionsToggle" type="button" aria-expanded="false" class="actions-circle-btn" title="More Actions">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="12" r="2.2"></circle>
+          <circle cx="19" cy="12" r="2.2"></circle>
+          <circle cx="5" cy="12" r="2.2"></circle>
+        </svg>
+      </button>
+      <div id="ui-actions-drawer" class="ui-actions-drawer" aria-hidden="true">
+        <div class="actions-drawer-header">Actions</div>
+        <button id="bNext" type="button" class="menu-action-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          </svg>
+          <span>Draw another</span>
+        </button>
+        <button id="bSave" type="button" class="menu-action-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+          </svg>
+          <span>Save frame</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rain Control with prominent overflow volume bar when active -->
+  <div id="rain-control" class="rain-control-group">
+    <button id="bRain" type="button" aria-pressed="false" class="rain-btn" title="Toggle Rain & Ambient Audio">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="16" y1="13" x2="16" y2="21"></line>
+        <line x1="8" y1="13" x2="8" y2="21"></line>
+        <line x1="12" y1="15" x2="12" y2="23"></line>
+        <path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"></path>
+      </svg>
+      <span>Rain</span>
+    </button>
+    <div id="rain-vol-wrap" class="rain-vol-wrap" title="Rain Audio Volume">
+      <div class="rain-vol-slider-box">
+        <div class="rain-vol-track">
+          <div id="rain-vol-fill" class="rain-vol-fill" style="width: 10%;"></div>
+        </div>
+        <input id="rain-vol-bar" class="custom-range rain-vol-range" type="range" min="0" max="100" value="10" step="1" aria-label="Rain Audio Volume">
+      </div>
+      <span id="rain-vol-label" class="rain-vol-label">10%</span>
+    </div>
+  </div>
+</nav>
+
+<!-- Hidden YouTube Embed Player Mounts -->
+<div id="yt-player-hidden" aria-hidden="true">
+  <div id="yt-player-embed"></div>
+  <div id="yt-rain-embed"></div>
+</div>
+
+<!-- Player Notice / Origin Alert Toast -->
+<div id="player-notice" class="player-notice" style="display: none;" role="alert">
+  <span id="player-notice-text"></span>
+  <button id="player-notice-close" class="glass-icon-btn" type="button" aria-label="Dismiss notice">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+  </button>
+</div>
+
+<!-- Expandable Apple-esque Glassmorphism Playlist Drawer -->
+<div id="playlist-drawer" class="apple-glass-panel" aria-label="Playlist Tracks">
+  <div class="playlist-header">
+    <div class="playlist-title-wrap">
+      <span class="playlist-header-title">Kaavish Collection</span>
+      <span class="playlist-header-badge">17 Tracks</span>
+    </div>
+    <button id="playlist-close" class="glass-icon-btn" type="button" aria-label="Close Playlist">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
+  </div>
+  <div class="playlist-search-wrap">
+    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+    <input id="playlist-search" type="text" placeholder="Search track or artist..." autocomplete="off" spellcheck="false">
+  </div>
+  <div id="playlist-list" class="playlist-list-scroll"></div>
+</div>
+
+<!-- Apple-esque Glassmorphic Music Player Capsule at Bottom Middle -->
+<div id="music-player" class="apple-glass-capsule" role="region" aria-label="Music Player">
+  <!-- Left: Circular spinning CD / Vinyl artwork (morphs to squared song art in collapsed mode) -->
+  <div class="cd-section">
+    <div id="cd-disc" class="cd-disc" title="Click to expand full player / play">
+      <div class="cd-grooves"></div>
+      <div class="cd-artwork-mask">
+        <img id="cd-thumb" src="https://i.ytimg.com/vi/9sekgEXGm-E/hqdefault.jpg" alt="Album Artwork" class="cd-thumb-img">
+      </div>
+      <div class="cd-center-hole">
+        <div class="cd-spindle"></div>
+      </div>
+      <div class="cd-sheen"></div>
+    </div>
+    <!-- Mini Squared Art expand hint overlay for collapsed mode -->
+    <div class="mini-expand-hint" aria-hidden="true" title="Open Full Player">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+    </div>
+  </div>
+
+  <!-- Center: Track Info + Minimal Seek Bar -->
+  <div class="player-main">
+    <div class="track-info-bar">
+      <div class="track-text">
+        <div id="player-track-title" class="track-title">Faasle</div>
+        <div id="player-track-artist" class="track-artist">Kaavish &amp; Quratulain Balouch</div>
+      </div>
+      <span id="player-track-count" class="track-count">1 / 17</span>
+    </div>
+
+    <div class="seek-row">
+      <span id="player-current-time" class="time-label">0:00</span>
+      <div class="seek-track-container">
+        <div id="player-seek-fill" class="seek-fill"></div>
+        <input id="player-seek-bar" class="custom-range seek-range" type="range" min="0" max="324" value="0" step="0.5" aria-label="Seek track position">
+      </div>
+      <span id="player-total-time" class="time-label">5:24</span>
+    </div>
+  </div>
+
+  <!-- Right: Playback, Volume, Playlist and Collapse Controls -->
+  <div class="player-controls">
+    <button id="btn-shuffle" class="glass-icon-btn opt-btn" type="button" aria-label="Shuffle" title="Shuffle">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
+    </button>
+    <button id="btn-prev" class="glass-icon-btn" type="button" aria-label="Previous Track" title="Previous">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></line></svg>
+    </button>
+    <button id="btn-play-pause" class="glass-play-btn" type="button" aria-label="Play" title="Play / Pause">
+      <svg id="icon-play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>
+      <svg id="icon-pause" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="6" y="4" width="4" height="16" rx="1.5"></rect><rect x="14" y="4" width="4" height="16" rx="1.5"></rect></svg>
+    </button>
+    <button id="btn-next" class="glass-icon-btn" type="button" aria-label="Next Track" title="Next">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></line></svg>
+    </button>
+    <button id="btn-repeat" class="glass-icon-btn opt-btn" type="button" aria-label="Repeat" title="Repeat: All Tracks">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+    </button>
+
+    <!-- Volume seek control -->
+    <div class="volume-container">
+      <button id="btn-volume" class="glass-icon-btn vol-icon-btn" type="button" aria-label="Mute / Unmute" title="Volume">
+        <svg id="icon-vol-high" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+        <svg id="icon-vol-low" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+        <svg id="icon-vol-mute" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+      </button>
+      <div class="volume-track-container">
+        <div id="player-volume-fill" class="volume-fill" style="width: 80%;"></div>
+        <input id="player-volume-bar" class="custom-range volume-range" type="range" min="0" max="100" value="80" step="1" aria-label="Volume">
+      </div>
+    </div>
+
+    <!-- Playlist drawer toggle button -->
+    <button id="btn-playlist-toggle" class="glass-icon-btn" type="button" aria-label="Toggle Playlist" title="Playlist">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+    </button>
+
+    <!-- Collapse / Minimize player button -->
+    <button id="btn-player-collapse" class="glass-icon-btn" type="button" aria-label="Collapse Player" title="Collapse to Squared Artwork">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="4 14 10 14 10 20"></polyline>
+        <polyline points="20 10 14 10 14 4"></polyline>
+        <line x1="14" y1="10" x2="21" y2="3"></line>
+        <line x1="3" y1="21" x2="10" y2="14"></line>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- Classic scripts on purpose: type="module" is CORS-blocked on file://, and
+     needing a dev server to look at a drawing is a bad trade. Order matters. -->
+<script src="https://www.youtube.com/iframe_api"></script>
+<script src="js/rng.js"></script>
+<script src="js/geom.js"></script>
+<script src="js/v3.js"></script>
+<script src="js/ink.js"></script>
+<script src="js/wash.js"></script>
+<script src="js/paper.js"></script>
+<script src="js/letter.js"></script>
+<script src="js/flora.js"></script>
+<script src="js/figure.js"></script>
+<script src="js/scene.js"></script>
+<script src="js/main.js"></script>
+<script src="js/player.js"></script>
+</body>
+</html>

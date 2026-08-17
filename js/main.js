@@ -1,0 +1,194 @@
+// ---------------------------------------------------------------------------
+// Wiring: one seed in, one moving shot out.
+//
+// Two phases. BUILD drains the queue across frames, drawing every sprite with
+// the real pencil — that is the expensive part and it happens once. RUN is
+// then nothing but blits, so it holds frame rate.
+// ---------------------------------------------------------------------------
+'use strict';
+
+const view = document.getElementById('c');
+const vctx = view.getContext('2d');
+
+let DPR = 1, W = 0, H = 0;
+let paperCv = null, SCN = null, SEED = 0, PAPER_GRAIN = null;
+let raf = 0, phase = 'build', last = 0;
+let MODE = 'run';
+let RAIN = false;
+
+const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function build(seed) {
+  SEED = seed >>> 0;
+  cancelAnimationFrame(raf);
+
+  DPR = Math.min(1.5, window.devicePixelRatio || 1);
+  W = Math.max(320, window.innerWidth);
+  H = Math.max(320, window.innerHeight);
+  view.width = Math.round(W * DPR); view.height = Math.round(H * DPR);
+  view.style.width = W + 'px'; view.style.height = H + 'px';
+  vctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  const R = mulberry32(SEED);
+  const p = buildPaper(W, H, DPR, SEED, {});
+  paperCv = p.canvas;
+  PAPER_GRAIN = p.grain;
+
+  SCN = buildScene(R, W, H, SEED, MODE);
+  SCN.rainActive = RAIN;
+
+  phase = 'build';
+  last = 0;
+  raf = requestAnimationFrame(tick);
+}
+
+// The pencil that draws the loading line needs a target of its own — the
+// sprite builder keeps stealing it.
+function progress(done, total) {
+  vctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  vctx.clearRect(0, 0, W, H);
+  vctx.drawImage(paperCv, 0, 0, W, H);
+  setInkTarget(vctx, { grain: PAPER_GRAIN, w: W, h: H });
+  const R = mulberry32(SEED ^ 0x10ad);
+  setPen(PENS[0]);
+  const sz = H * 0.02;
+  lettering(R, 'DRAWING', W * 0.5 - textW('DRAWING', sz) / 2, H * 0.5, sz, { alpha: 0.55 });
+  const bw = W * 0.16, bx = W * 0.5 - bw / 2, by = H * 0.5 + sz * 1.2;
+  ink(R, [[bx, by], [bx + bw * (done / Math.max(1, total)), by]], 1.6,
+    { alpha: 0.4, amp: 0.7, skip: 1.2, nib: false });
+}
+
+function tick(now) {
+  const dt = last ? Math.min(0.05, (now - last) / 1000) : 0.016;
+  last = now;
+
+  if (phase === 'build') {
+    const total = Q.length + (SCN.builtCount || 0);
+    const t0 = performance.now();
+    let n = 0;
+    // Fast batch draining: processes multiple sprites per frame for snappy loading
+    while (Q.length && (n < 16 || performance.now() - t0 < 32)) {
+      if (performance.now() - t0 > 36) break;
+      Q.shift()(); n++;
+      SCN.builtCount = (SCN.builtCount || 0) + 1;
+    }
+    progress(SCN.builtCount, total);
+    if (!Q.length) phase = 'run';
+    raf = requestAnimationFrame(tick);
+    return;
+  }
+
+  if (!reduced()) updateScene(SCN, dt);
+  vctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  vctx.clearRect(0, 0, W, H);
+  vctx.drawImage(paperCv, 0, 0, W, H);
+  renderScene(vctx, SCN);
+  raf = requestAnimationFrame(tick);
+}
+
+// ---------------------------------------------------------------------------
+function seedFromUrl() {
+  const v = new URLSearchParams(location.search).get('seed');
+  const n = v === null ? NaN : parseInt(v, 10);
+  return Number.isFinite(n) ? n >>> 0 : randSeed();
+}
+
+function go(seed, replace) {
+  const u = new URL(location.href);
+  u.searchParams.set('seed', String(seed >>> 0));
+  history[replace ? 'replaceState' : 'pushState']({}, '', u);
+  build(seed);
+}
+
+// Collapsible Actions Drawer (Draw another / Save frame)
+const bActionsToggle = document.getElementById('bActionsToggle');
+const uiActionsGroup = document.getElementById('ui-actions-group');
+if (bActionsToggle && uiActionsGroup) {
+  bActionsToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = uiActionsGroup.classList.toggle('open');
+    bActionsToggle.setAttribute('aria-expanded', String(isOpen));
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!uiActionsGroup.contains(e.target)) {
+      uiActionsGroup.classList.remove('open');
+      bActionsToggle.setAttribute('aria-expanded', 'false');
+    }
+  });
+}
+
+document.getElementById('bNext').addEventListener('click', () => {
+  if (uiActionsGroup) {
+    uiActionsGroup.classList.remove('open');
+    if (bActionsToggle) bActionsToggle.setAttribute('aria-expanded', 'false');
+  }
+  if (typeof window !== 'undefined' && typeof window.va === 'function') {
+    try { window.va('event', { name: 'draw_another' }); } catch (e) {}
+  }
+  go(randSeed(), false);
+});
+
+document.getElementById('bSave').addEventListener('click', () => {
+  if (uiActionsGroup) {
+    uiActionsGroup.classList.remove('open');
+    if (bActionsToggle) bActionsToggle.setAttribute('aria-expanded', 'false');
+  }
+  if (typeof window !== 'undefined' && typeof window.va === 'function') {
+    try { window.va('event', { name: 'save_frame' }); } catch (e) {}
+  }
+  const a = document.createElement('a');
+  a.download = 'field-book-' + SEED + '.png';
+  a.href = view.toDataURL('image/png');
+  a.click();
+});
+
+const bRain = document.getElementById('bRain');
+const rainVolBar = document.getElementById('rain-vol-bar');
+const rainVolFill = document.getElementById('rain-vol-fill');
+const rainVolLabel = document.getElementById('rain-vol-label');
+
+if (bRain) {
+  bRain.addEventListener('click', () => {
+    RAIN = !RAIN;
+    bRain.setAttribute('aria-pressed', String(RAIN));
+    if (SCN) SCN.rainActive = RAIN;
+    if (typeof window !== 'undefined' && typeof window.setRainAudio === 'function') {
+      window.setRainAudio(RAIN);
+    }
+    if (typeof window !== 'undefined' && typeof window.va === 'function') {
+      try { window.va('event', { name: 'toggle_rain', active: RAIN }); } catch (e) {}
+    }
+  });
+}
+
+if (rainVolBar) {
+  rainVolBar.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value, 10) || 0;
+    if (rainVolFill) rainVolFill.style.width = val + '%';
+    if (rainVolLabel) rainVolLabel.textContent = val + '%';
+    if (typeof window !== 'undefined' && typeof window.setRainVolume === 'function') {
+      window.setRainVolume(val);
+    }
+  });
+}
+for (const btn of document.querySelectorAll('#modes button')) {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.mode === MODE) return;
+    MODE = btn.dataset.mode;
+    for (const b of document.querySelectorAll('#modes button')) b.setAttribute('aria-pressed', String(b === btn));
+    if (typeof window !== 'undefined' && typeof window.va === 'function') {
+      try { window.va('event', { name: 'change_gait', mode: MODE }); } catch (e) {}
+    }
+    build(SEED);                                 // same seed: same world, different gait
+  });
+}
+window.addEventListener('popstate', () => build(seedFromUrl()));
+
+let rz = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(rz);
+  rz = setTimeout(() => build(SEED), 300);
+});
+
+go(seedFromUrl(), true);

@@ -1,0 +1,7 @@
+node_modules/
+snap.png
+*.log
+dist/
+.claude/
+CLAUDE.md
+PLAN.md
