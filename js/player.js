@@ -283,30 +283,6 @@ class MusicPlayerController {
             onError: (e) => this.onPlayerError(e)
           }
         });
-
-        // Ambient Rain Audio YouTube Player (plays looped ambient rain sound at 10% volume)
-        const rainVideoId = 'Qo4JIT8jMtI';
-        const rainVars = Object.assign({}, playerVars, {
-          loop: 1,
-          playlist: rainVideoId
-        });
-
-        this.rainPlayer = new window.YT.Player('yt-rain-embed', {
-          host: 'https://www.youtube-nocookie.com',
-          height: '200',
-          width: '200',
-          videoId: rainVideoId,
-          playerVars: rainVars,
-          events: {
-            onReady: (e) => {
-              this.isRainReady = true;
-              try { this.rainPlayer.setVolume(10); } catch (err) {}
-              if (this.isRainActive) {
-                try { this.rainPlayer.playVideo(); } catch (err) {}
-              }
-            }
-          }
-        });
       } catch (err) {
         console.warn('YT Player init error:', err);
       }
@@ -900,11 +876,16 @@ class MusicPlayerController {
     });
 
     const enableAudioOnInteraction = () => {
-      document.removeEventListener('pointerdown', enableAudioOnInteraction);
-      document.removeEventListener('keydown', enableAudioOnInteraction);
+      if (this.rainEngine) {
+        this.rainEngine.init();
+        if (this.rainEngine.ctx && this.rainEngine.ctx.state === 'suspended') {
+          this.rainEngine.ctx.resume();
+        }
+      }
     };
-    document.addEventListener('pointerdown', enableAudioOnInteraction, { once: true });
-    document.addEventListener('keydown', enableAudioOnInteraction, { once: true });
+    ['touchstart', 'touchend', 'pointerdown', 'click', 'keydown'].forEach(evt => {
+      document.addEventListener(evt, enableAudioOnInteraction, { passive: true });
+    });
   }
 
   toggleCollapse(collapsed) {
@@ -921,27 +902,13 @@ class MusicPlayerController {
   setRain(active) {
     this.isRainActive = !!active;
 
-    // 1. Web Audio Procedural Rain Sound (guaranteed concurrent simultaneous audio on mobile & desktop)
+    // Web Audio Procedural Rain Sound (guaranteed concurrent simultaneous audio on iOS, mobile & desktop)
     if (this.rainEngine) {
       if (this.isRainActive) {
         this.rainEngine.setVolume(this.rainVolume ?? 10);
         this.rainEngine.play();
       } else {
         this.rainEngine.stop();
-      }
-    }
-
-    // 2. YouTube Rain Player (for desktop browsers)
-    if (this.rainPlayer && this.isRainReady) {
-      try {
-        if (this.isRainActive) {
-          this.rainPlayer.setVolume(this.rainVolume ?? 10);
-          this.rainPlayer.playVideo();
-        } else {
-          this.rainPlayer.pauseVideo();
-        }
-      } catch (err) {
-        console.warn('Rain player toggle error:', err);
       }
     }
   }
@@ -951,11 +918,6 @@ class MusicPlayerController {
     this.rainVolume = v;
     if (this.rainEngine) {
       this.rainEngine.setVolume(v);
-    }
-    if (this.rainPlayer && this.isRainReady) {
-      try {
-        this.rainPlayer.setVolume(v);
-      } catch (err) {}
     }
   }
 }
