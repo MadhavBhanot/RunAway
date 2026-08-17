@@ -129,7 +129,7 @@ document.getElementById('bNext').addEventListener('click', () => {
   go(randSeed(), false);
 });
 
-document.getElementById('bSave').addEventListener('click', () => {
+document.getElementById('bSave').addEventListener('click', async () => {
   if (uiActionsGroup) {
     uiActionsGroup.classList.remove('open');
     if (bActionsToggle) bActionsToggle.setAttribute('aria-expanded', 'false');
@@ -137,11 +137,84 @@ document.getElementById('bSave').addEventListener('click', () => {
   if (typeof window !== 'undefined' && typeof window.va === 'function') {
     try { window.va('event', { name: 'save_frame' }); } catch (e) {}
   }
-  const a = document.createElement('a');
-  a.download = 'field-book-' + SEED + '.png';
-  a.href = view.toDataURL('image/png');
-  a.click();
+
+  const filename = 'field-book-' + SEED + '.png';
+
+  // 1. If Web Share API with File support is available (iOS Chrome, iOS Safari, Android)
+  if (navigator.share && navigator.canShare && typeof view.toBlob === 'function') {
+    try {
+      view.toBlob(async (blob) => {
+        if (!blob) {
+          fallbackDownload(filename);
+          return;
+        }
+        try {
+          const file = new File([blob], filename, { type: 'image/png' });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: 'Field Book - ' + SEED,
+              text: 'Field Book frame ' + SEED
+            });
+            return;
+          }
+        } catch (err) {
+          if (err.name === 'AbortError') return; // User simply closed the iOS share sheet
+        }
+        fallbackDownload(filename);
+      }, 'image/png');
+      return;
+    } catch (e) {}
+  }
+
+  fallbackDownload(filename);
 });
+
+function fallbackDownload(filename) {
+  try {
+    const dataUrl = view.toDataURL('image/png');
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    if (isIOS) {
+      // On iOS WebKit, window.open or rendering to a tab allows direct long-press "Save to Photos"
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>${filename}</title>
+              <style>
+                body { margin: 0; background: #1a1714; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: -apple-system, sans-serif; color: #fff; text-align: center; }
+                img { max-width: 95vw; max-height: 85vh; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+                p { margin-top: 14px; font-size: 14px; opacity: 0.7; }
+              </style>
+            </head>
+            <body>
+              <img src="${dataUrl}" alt="${filename}">
+              <p>Touch and hold the image to save to Photos</p>
+            </body>
+          </html>
+        `);
+        return;
+      }
+    }
+
+    const a = document.createElement('a');
+    a.download = filename;
+    a.href = dataUrl;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      if (a.parentNode) a.parentNode.removeChild(a);
+    }, 200);
+  } catch (err) {
+    console.warn('Fallback download error:', err);
+  }
+}
 
 const bRain = document.getElementById('bRain');
 const rainVolBar = document.getElementById('rain-vol-bar');
