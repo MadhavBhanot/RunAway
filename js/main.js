@@ -13,7 +13,7 @@ const vctx = view.getContext('2d');
 let DPR = 1, W = 0, H = 0;
 let paperCv = null, SCN = null, SEED = 0, PAPER_GRAIN = null;
 let raf = 0, phase = 'build', last = 0;
-let MODE = 'run';
+let MODE = 'walk';
 let RAIN = false;
 
 const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;

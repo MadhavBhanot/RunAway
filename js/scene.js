@@ -118,7 +118,7 @@ function sprite(w, h, fn) {
 
 function buildScene(R, W, H, seed, mode) {
   Q.length = 0;
-  const gait = GAITS[mode] || GAITS.run;
+  const gait = GAITS[mode] || GAITS.walk;
 
   const rainCount = 180;
   const rainStreaks = [];
