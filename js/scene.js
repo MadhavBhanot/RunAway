@@ -152,54 +152,33 @@ function buildScene(R, W, H, seed, mode) {
     species: shuffle(R, SPECIES.slice()),
     rainStreaks,
     rainActive: false,
-    shadowFloraStamp: null,
-    shadowGrassStamp: null,
-    shadowRainFloraStamp: null,
-    shadowRainGrassStamp: null
+    shadowStepStamp: null,
+    shadowRainStepStamp: null
   };
 
-  // Pre-baked reusable soft blurred watercolor shadow stamps (Zero GC allocations per frame!)
+  // Pre-baked reusable soft blurred watercolor step stamps
   push(() => {
     const stampBox = 64;
-    S.shadowFloraStamp = sprite(stampBox, stampBox, (g) => {
-      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 1, stampBox / 2, stampBox / 2, stampBox / 2);
-      rad.addColorStop(0, 'rgba(40, 30, 52, 0.42)');
-      rad.addColorStop(0.45, 'rgba(40, 30, 52, 0.20)');
-      rad.addColorStop(0.85, 'rgba(40, 30, 52, 0.05)');
-      rad.addColorStop(1, 'rgba(40, 30, 52, 0)');
+
+    // Aesthetic visible foot step shadow stamps
+    S.shadowStepStamp = sprite(stampBox, stampBox, (g) => {
+      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 2, stampBox / 2, stampBox / 2, stampBox / 2);
+      rad.addColorStop(0, 'rgba(34, 24, 46, 0.62)');
+      rad.addColorStop(0.35, 'rgba(34, 24, 46, 0.35)');
+      rad.addColorStop(0.70, 'rgba(34, 24, 46, 0.10)');
+      rad.addColorStop(1, 'rgba(34, 24, 46, 0)');
       g.fillStyle = rad;
       g.beginPath();
       g.arc(stampBox / 2, stampBox / 2, stampBox / 2, 0, Math.PI * 2);
       g.fill();
     });
 
-    S.shadowGrassStamp = sprite(stampBox, stampBox, (g) => {
-      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 1, stampBox / 2, stampBox / 2, stampBox / 2);
-      rad.addColorStop(0, 'rgba(40, 30, 52, 0.28)');
-      rad.addColorStop(0.5, 'rgba(40, 30, 52, 0.12)');
-      rad.addColorStop(1, 'rgba(40, 30, 52, 0)');
-      g.fillStyle = rad;
-      g.beginPath();
-      g.arc(stampBox / 2, stampBox / 2, stampBox / 2, 0, Math.PI * 2);
-      g.fill();
-    });
-
-    S.shadowRainFloraStamp = sprite(stampBox, stampBox, (g) => {
-      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 1, stampBox / 2, stampBox / 2, stampBox / 2);
-      rad.addColorStop(0, 'rgba(16, 24, 32, 0.50)');
-      rad.addColorStop(0.45, 'rgba(16, 24, 32, 0.24)');
-      rad.addColorStop(1, 'rgba(16, 24, 32, 0)');
-      g.fillStyle = rad;
-      g.beginPath();
-      g.arc(stampBox / 2, stampBox / 2, stampBox / 2, 0, Math.PI * 2);
-      g.fill();
-    });
-
-    S.shadowRainGrassStamp = sprite(stampBox, stampBox, (g) => {
-      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 1, stampBox / 2, stampBox / 2, stampBox / 2);
-      rad.addColorStop(0, 'rgba(16, 24, 32, 0.32)');
-      rad.addColorStop(0.5, 'rgba(16, 24, 32, 0.14)');
-      rad.addColorStop(1, 'rgba(16, 24, 32, 0)');
+    S.shadowRainStepStamp = sprite(stampBox, stampBox, (g) => {
+      const rad = g.createRadialGradient(stampBox / 2, stampBox / 2, 2, stampBox / 2, stampBox / 2, stampBox / 2);
+      rad.addColorStop(0, 'rgba(16, 24, 34, 0.68)');
+      rad.addColorStop(0.35, 'rgba(16, 24, 34, 0.38)');
+      rad.addColorStop(0.70, 'rgba(16, 24, 34, 0.12)');
+      rad.addColorStop(1, 'rgba(16, 24, 34, 0)');
       g.fillStyle = rad;
       g.beginPath();
       g.arc(stampBox / 2, stampBox / 2, stampBox / 2, 0, Math.PI * 2);
@@ -513,18 +492,12 @@ function buildScene(R, W, H, seed, mode) {
   // with, and he reads as a giant standing at the horizon.
   const figH = 1.8 * S.focal / S.zRunner;
   const cam = makeCamera({
-    // A quarter turn is dead behind him — and dead behind is the one angle
-    // where a run is invisible, because the whole stride swings along the line
-    // of sight and projects to almost nothing. Half a radian off it is still
-    // clearly a view from behind, and the legs actually travel.
     yaw: -Math.PI / 2 + rr(R, 0.44, 0.58),
     pitch: rr(R, 0.05, 0.11),
     focal: 950
   });
-  // One scale and one origin for the WHOLE cycle, measured once. Re-fitting
-  // each drawing to the same box would iron out the bob and glue his feet to a
-  // line — the two things that make a run look like a run.
-  const bw = figH * 2.2, bh = figH * 1.8;
+  // One scale and one origin for the WHOLE cycle, measured once.
+  const bw = figH * 2.0, bh = figH * 1.7;
   const ref = buildRig(FULL_CYCLE[0]);
   let lo = Infinity, hi = -Infinity;
   for (const k in ref) {
@@ -540,10 +513,8 @@ function buildScene(R, W, H, seed, mode) {
   for (let i = 0; i < FRAMES; i++) {
     push(() => {
       const pose = Object.assign({}, poseAt(i / FRAMES, gait.cycle));
-      // its own seed per drawing, so each one boils independently — that is
-      // the hand redrawing him, and the whole point of shooting on twos
+      // its own seed per drawing, so each one boils independently
       const FR = mulberry32((seed ^ 0x9e37) + i * 7919);
-      // a stumble is off balance, which a run and a walk are not
       if (gait.leanNoise) pose.lean += rr(FR, -gait.leanNoise, gait.leanNoise);
       const J = buildRig(pose, { jit: () => rr(FR, -gait.jit, gait.jit) });
       const P = projectRig(J, cam, ox, oy, scale);
@@ -551,10 +522,10 @@ function buildScene(R, W, H, seed, mode) {
         const prev = getPen();
         const canFilter = (g && typeof g.filter === 'string');
 
-        // 0. Articulated 3D Ground Cast Shadow (Slender, translucent, realistic grass-draped shadow)
+        // 0. Faint, very subtle, soft 3D ground cast shadow (Longer, but whisper-soft)
         const S_pts = {};
-        const sunDirX = -0.42;
-        const sunDirZ = -0.85;
+        const sunDirX = -0.38;
+        const sunDirZ = -0.75;
         for (const k in J) {
           if (k === 'headR') continue;
           const pt = J[k];
@@ -563,8 +534,8 @@ function buildScene(R, W, H, seed, mode) {
           S_pts[k] = [ox + proj.x * scale, oy + proj.y * scale];
         }
 
-        // Subtle grass ripple: gently wiggles shadow lines over uneven turf
-        const warp = (pts, amp = 1.6, freq = 0.18) => {
+        // Gentle grass ripple for the faint shadow
+        const warp = (pts, amp = 1.2, freq = 0.18) => {
           const res = [];
           for (let idx = 0; idx < pts.length; idx++) {
             const p = pts[idx];
@@ -589,32 +560,30 @@ function buildScene(R, W, H, seed, mode) {
           return res;
         };
 
-        // Slender, tangible, watercolor cast shadow (soft optical blur)
-        if (canFilter) g.filter = 'blur(2.6px)';
-        setPen([44, 34, 52]);
+        if (canFilter) g.filter = 'blur(2.4px)';
+        setPen([44, 36, 52]);
 
-        // Translucent torso & spine shadow
-        const spineWarped = warp([S_pts.pelvis, S_pts.chest, S_pts.neck, S_pts.head], 2.2);
-        ink(FR, spineWarped, 4.4, { alpha: 0.36, amp: 0.9, skip: 0.2, nib: false, minPress: 0.35 });
+        // Faint torso & spine shadow
+        const spineWarped = warp([S_pts.pelvis, S_pts.chest, S_pts.neck, S_pts.head], 1.4);
+        ink(FR, spineWarped, 2.4, { alpha: 0.14, amp: 0.5, skip: 0.2, nib: false, minPress: 0.25 });
 
-        // Translucent arms shadow
+        // Faint arms shadow
         for (const s of ['L', 'R']) {
-          const armWarped = warp([S_pts['shoulder' + s], S_pts['elbow' + s], S_pts['wrist' + s]], 1.8);
-          ink(FR, armWarped, 3.2, { alpha: 0.28, amp: 0.7, skip: 0.2, nib: false, minPress: 0.3 });
+          const armWarped = warp([S_pts['shoulder' + s], S_pts['elbow' + s], S_pts['wrist' + s]], 1.2);
+          ink(FR, armWarped, 1.8, { alpha: 0.11, amp: 0.4, skip: 0.2, nib: false, minPress: 0.2 });
         }
 
-        // Open, delicate head ring shadow
-        inkLoop(FR, ring(FR, S_pts.head[0], S_pts.head[1], P.headR * 0.95, P.headR * 0.75, 9, 0, 0.1),
-          2.6, { alpha: 0.30, redraw: 0.15, segs: 2 });
+        // Faint open head ring shadow
+        inkLoop(FR, ring(FR, S_pts.head[0], S_pts.head[1], P.headR * 0.85, P.headR * 0.65, 8, 0, 0.1),
+          1.6, { alpha: 0.12, redraw: 0.1, segs: 2 });
 
-        // Slender legs shadow
+        // Faint legs shadow
         if (canFilter) g.filter = 'blur(1.6px)';
         for (const s of ['L', 'R']) {
-          const legWarped = warp([S_pts['hip' + s], S_pts['knee' + s], S_pts['ankle' + s], S_pts['toe' + s]], 2.0);
-          ink(FR, legWarped, 3.8, { alpha: 0.38, amp: 0.8, skip: 0.2, nib: false, minPress: 0.4 });
+          const legWarped = warp([S_pts['hip' + s], S_pts['knee' + s], S_pts['ankle' + s], S_pts['toe' + s]], 1.4);
+          ink(FR, legWarped, 2.6, { alpha: 0.16, amp: 0.5, skip: 0.2, nib: false, minPress: 0.3 });
         }
 
-        // Reset filter for crisp pencil stickman & rim light
         if (canFilter) g.filter = 'none';
 
         // 1. Cinematic Golden Sunset Rim Light (Sunlight catching shoulders, spine & limbs)
@@ -758,23 +727,37 @@ function renderScene(g, S) {
     drawn = true;
     const rx = W / 2, ry = runnerY;
 
-    // --- 1. Realistic Subtle Foot Ground Contact (Zero Big Blobs) ---
+    // --- 1. Aesthetic Visible Foot Step Shadows (Soft watercolor footprint on turf) ---
     const feet = [fr.footL, fr.footR];
     for (let f = 0; f < feet.length; f++) {
       const foot = feet[f];
       if (!foot) continue;
       const fx = rx + foot[0];
       const heightAboveGround = Math.max(0, -foot[1]);
-      const proximity = Math.max(0, 1 - heightAboveGround / 12);
+      const proximity = Math.max(0, 1 - heightAboveGround / 18); // 1 on ground, 0 in air
 
-      if (proximity > 0.1) {
+      if (proximity > 0.05) {
         g.save();
         g.globalCompositeOperation = 'multiply';
-        const shadowBase = S.rainActive ? '18, 24, 32' : '36, 26, 44';
-        g.fillStyle = `rgba(${shadowBase}, ${(0.20 * proximity).toFixed(3)})`;
-        g.beginPath();
-        g.ellipse(fx, ry + 0.5, 4.0, 1.1, 0, 0, Math.PI * 2);
-        g.fill();
+        const stepAlpha = 0.85 * proximity;
+        g.globalAlpha = stepAlpha;
+
+        // Aesthetic, visible soft watercolor footstep footprint (32px x 10.5px, +20% size)
+        const stepW = 32 * (1 + (1 - proximity) * 0.3);
+        const stepH = stepW * 0.32;
+
+        g.translate(fx, ry + 1.4);
+        g.rotate(-0.22); // Subtle sunset slant
+        const stamp = S.rainActive ? S.shadowRainStepStamp : S.shadowStepStamp;
+        if (stamp) {
+          g.drawImage(stamp, -stepW * 0.5, -stepH * 0.5, stepW, stepH);
+        } else {
+          const shadowBase = S.rainActive ? '16, 24, 34' : '34, 24, 46';
+          g.fillStyle = `rgba(${shadowBase}, ${(0.48 * proximity).toFixed(3)})`;
+          g.beginPath();
+          g.ellipse(0, 0, stepW * 0.45, stepH * 0.45, 0, 0, Math.PI * 2);
+          g.fill();
+        }
         g.restore();
       }
     }
@@ -791,7 +774,7 @@ function renderScene(g, S) {
     g.fill();
     g.restore();
 
-    // 3. Runner Drawing (with synchronized 3D ground cast shadow)
+    // 3. Runner Drawing (with subtle 3D cast shadow)
     g.drawImage(fr.cv, rx - fr.w * 0.52, ry - fr.h * 0.82, fr.w, fr.h);
   };
 
@@ -834,20 +817,28 @@ function renderScene(g, S) {
     const isFlora = it.kind === 'flora';
     const rainPop = (S.rainActive && isFlora);
 
-    // 0. Super-fast hardware accelerated pre-baked Ground Cast Shadow
+    // 0. Realistic Soft Blurred Ground Cast Shadow for Flowers & Grass Stalks
     if (it.kind !== 'bird' && h > 5) {
       g.save();
       g.globalCompositeOperation = 'multiply';
-      g.globalAlpha = (isFlora ? 0.72 : 0.42) * it.alpha * (rainPop ? 1.2 : 1);
-      const shLen = h * (isFlora ? 0.42 : 0.26);
-      const shW = Math.max(4, w * (isFlora ? 0.60 : 0.40));
+      const shAlpha = (isFlora ? 0.20 : 0.12) * it.alpha * (rainPop ? 1.2 : 1);
+      const shBase = S.rainActive ? '16, 24, 32' : '40, 30, 50';
+      const shLen = h * (isFlora ? 0.38 : 0.24);
+      const shW = Math.max(3.5, w * (isFlora ? 0.55 : 0.38));
 
       g.translate(sx, sy);
-      g.rotate(-0.35 + (bend * 0.35));
-      const stamp = S.rainActive
-        ? (isFlora ? S.shadowRainFloraStamp : S.shadowRainGrassStamp)
-        : (isFlora ? S.shadowFloraStamp : S.shadowGrassStamp);
-      if (stamp) g.drawImage(stamp, -shLen * 0.8, -shW * 0.3, shLen * 0.8, shW * 0.6);
+      g.rotate(-0.35 + (bend * 0.35)); // Follows sunset light vector & plant sway
+      g.scale(1.2, 0.26); // Flat on horizontal ground perspective
+
+      const shGrad = g.createRadialGradient(-shLen * 0.35, 0, 1, -shLen * 0.35, 0, shLen);
+      shGrad.addColorStop(0, `rgba(${shBase}, ${shAlpha.toFixed(3)})`);
+      shGrad.addColorStop(0.45, `rgba(${shBase}, ${(shAlpha * 0.45).toFixed(3)})`);
+      shGrad.addColorStop(1, `rgba(${shBase}, 0)`);
+
+      g.fillStyle = shGrad;
+      g.beginPath();
+      g.ellipse(-shLen * 0.35, 0, shLen * 0.75, shW * 0.6, 0, 0, Math.PI * 2);
+      g.fill();
       g.restore();
     }
 
