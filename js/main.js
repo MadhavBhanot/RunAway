@@ -138,7 +138,7 @@ document.getElementById('bSave').addEventListener('click', async () => {
     try { window.va('event', { name: 'save_frame' }); } catch (e) {}
   }
 
-  const filename = 'field-book-' + SEED + '.png';
+  const filename = 'runaway-' + SEED + '.png';
 
   // 1. If Web Share API with File support is available (iOS Chrome, iOS Safari, Android)
   if (navigator.share && navigator.canShare && typeof view.toBlob === 'function') {
@@ -153,8 +153,8 @@ document.getElementById('bSave').addEventListener('click', async () => {
           if (navigator.canShare({ files: [file] })) {
             await navigator.share({
               files: [file],
-              title: 'Field Book - ' + SEED,
-              text: 'Field Book frame ' + SEED
+              title: 'RunAway - ' + SEED,
+              text: 'RunAway frame ' + SEED
             });
             return;
           }
